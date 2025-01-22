@@ -2,6 +2,8 @@
 
 **Link to QA:** https://eg-123.internal.qa-url.com
 
+**Approvals Required:** 2 backend developers, particularly from (person). 
+
 ## Description
 
 Replace this section with a description of the changes you have made, and how they may be tested. If appropriate, provide any extra context regarding why certain architectural choices were made, and make note of any known limitations with the solution provided. Your own comments on specific lines of code should be added to the related line(s) of code within the `Files Changed` tab.  
