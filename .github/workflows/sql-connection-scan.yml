@@ -1,0 +1,164 @@
+name: Warn on modified SQL Server connection strings
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  scan-sql-connection-strings:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan PR diff for changed SQL Server connection strings
+        id: scan
+        shell: bash
+        run: |
+          set -eo pipefail
+
+          trap 'echo "::warning::Scan step failed on line $LINENO: command '\''$BASH_COMMAND'\'' exited with status $?. Aborting scan step." >&2' ERR
+
+          # (Server or Data Source) AND (Database or Initial Catalog)
+          is_sql_connstr() {
+            local s="$1"
+            echo "$s" | grep -Eiq '(Server|Data Source) *= *[^;"]+;?' || return 1
+            echo "$s" | grep -Eiq '(Database|Initial Catalog) *= *[^;"]+;?' || return 1
+          }
+
+          git fetch origin ${{ github.event.pull_request.base.ref }}
+          diff="$(git diff --no-color --unified=0 origin/${{ github.event.pull_request.base.ref }}...HEAD)"
+
+          found="false"
+          flagged=""
+          prev=""
+          file=""
+          hunk_start=0
+          line_offset=0
+
+          while IFS= read -r line; do
+            if [[ "$line" =~ ^diff\ --git ]]; then
+              file=$(echo "$line" | awk '{print $4}' | sed 's|^b/||')
+              continue
+            fi
+
+            if [[ "$line" =~ ^@@ ]]; then
+              hunk_start=$(echo "$line" | sed -E 's/.*\+([0-9]+).*/\1/')
+              line_offset=0
+              continue
+            fi
+
+            if [[ "$line" =~ ^\+ ]]; then
+              : "${line_offset:=0}"
+              lineno=$((hunk_start + line_offset))
+              ((++line_offset))
+            fi
+
+            if [[ "$line" =~ ^- ]]; then
+              content="${line:1}" # strip leading '-'
+              if is_sql_connstr "$content"; then
+                prev="$line"
+                continue
+              fi
+            fi
+
+            if [[ "$line" =~ ^\+ ]] && [[ -n "$prev" ]]; then
+              content_new="${line:1}" # strip leading '+'
+              content_old="${prev:1}" # strip leading '-'
+
+              if is_sql_connstr "$content_new"; then
+                # Strip all whitespace before comparing
+                norm_new=$(echo "$content_new" | tr -d '[:space:]')
+                norm_old=$(echo "$content_old" | tr -d '[:space:]')
+
+                if [[ "$norm_new" == "$norm_old" ]]; then
+                  prev=""
+                  continue
+                fi
+
+                commit_sha=$(git blame -l -L "$lineno","$lineno" -- "$file" | awk '{print $1}')
+                short_sha=$(echo "$commit_sha" | cut -c1-7)
+                pr_number=$(jq -r .pull_request.number < "$GITHUB_EVENT_PATH")
+                repo_url="https://github.com/$GITHUB_REPOSITORY/pull/$pr_number/commits"
+
+                flagged+=$'\n'"- \`$file\` line $lineno ([commit $short_sha]($repo_url/$commit_sha))"$'\n'
+                flagged+=$'```diff\n'"$prev"$'\n'"$line"$'\n```'$'\n'
+
+                prev=""
+                found="true"
+                continue
+              fi
+            fi
+
+            if [[ ! "$line" =~ ^[+-] ]]; then
+              prev=""
+            fi
+          done <<< "$diff"
+
+          if [[ "$found" == "true" ]]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "matches<<EOF"
+              printf "%s" "$flagged"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Manage PR comment
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const header = "**Modified SQL Server connection string(s) detected in this PR**";
+            const found = process.env.FOUND;
+            const matches = process.env.MATCHES || "";
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+            });
+
+            const existing = comments.find(c =>
+              c.user.type === "Bot" && c.body && c.body.includes(header)
+            );
+
+            if (found === "true") {
+              const body = [
+                header,
+                "",
+                matches.trim(),
+                "",
+                "Please ensure changes to connection strings are intentional."
+              ].join("\n");
+
+              if (existing) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: existing.id,
+                  body
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.payload.pull_request.number,
+                  body
+                });
+              }
+            } else if (existing) {
+              await github.rest.issues.deleteComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id
+              });
+            }
+
+        env:
+          FOUND: ${{ steps.scan.outputs.found }}
+          MATCHES: ${{ steps.scan.outputs.matches }}
