@@ -12,7 +12,7 @@ The level of detail provided here is situational, use your own judgement and try
 
 ### Checklist
 
-Please confirm each item **before** assigning people to this PR. 
+Please confirm each item **before** assigning people to this PR.
 
 - [ ] I have reviewed automated feedback from Copilot
 - [ ] I have checked for any issues with whitespace and code formatting.
