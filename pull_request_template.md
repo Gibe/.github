@@ -12,13 +12,14 @@ The level of detail provided here is situational, use your own judgement and try
 
 ### Checklist
 
-Please confirm each item before assigning people to this PR. 
+Please confirm each item **before** assigning people to this PR.
 
+- [ ] I have reviewed automated feedback from Copilot
 - [ ] I have checked for any issues with whitespace and code formatting.
 - [ ] I have checked that my code complies with our code standards [as documented](https://gibedigital.getoutline.com/doc/coding-standards-tWNxsvJIhK).
 - [ ] I have checked that the TeamCity build for this branch succeeds.
 - [ ] I have selected an appropriate base branch for this PR to be set against for comparison purposes. I.e. I have selected the branch on which this work is based.
-- [ ] If appropriate, I have updated the gherkins on this branch 
+- [ ] If appropriate, I have updated the gherkins on this branch
 
 ### Misc (remove this section)
 
